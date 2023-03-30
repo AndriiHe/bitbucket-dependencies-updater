@@ -15,6 +15,7 @@ const httpClient = RxHR.defaults({
 });
 
 // TODO: add destination branch
+// TODO: add progress logging
 
 function createBranch(name) {
   // TODO: handle already created branch
@@ -30,6 +31,7 @@ function getPackageJsonContent() {
     // TODO: handle errors
     map(({ body }) => body),
     map(({ values }) => values.find(file => file.path === 'package.json')),
+    // TODO: get file content as string
     mergeMap(file => httpClient.get(file.links.self.href)),
     map(({ body }) => body),
   );
@@ -49,6 +51,7 @@ function updateDependenciesVersions(packageJson, dependencyName, dependencyVersi
 function commitPackageJson(packageJson, branch) {
   return httpClient.post(`${baseUrl}/src`, {
     form: {
+      // TODO: work with it as with text, it will prevent formatting issues
       'package.json': JSON.stringify(packageJson, null, 2),
       branch,
       message: `Update ${branch}`
@@ -73,4 +76,4 @@ getPackageJsonContent().pipe(
     mergeMap(() => commitPackageJson(packageJson, branchName)),
     mergeMap(() => createPullRequest('master', branchName)),
   )),
-).subscribe();
+).subscribe(() => console.log('Done'));
