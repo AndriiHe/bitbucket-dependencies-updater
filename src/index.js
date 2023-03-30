@@ -9,37 +9,68 @@ const branchName = `${process.env.DEPENDENCY_NAME}-${process.env.DEPENDENCY_VERS
 
 const baseUrl = `https://api.bitbucket.org/2.0/repositories/${workspace}/${repository}`;
 
-const defaults = {
+const httpClient = RxHR.defaults({
   headers: { Authorization: `Bearer ${token}` },
   json: true,
-};
+});
+
+// TODO: add destination branch
 
 function createBranch(name) {
   // TODO: handle already created branch
-  return RxHR.post(`${baseUrl}/refs/branches`, {
-    ...defaults,
-    body: {
-      name : name,
-      target : { hash : 'master' },
-    },
-  }).pipe(
-    map(({ body }) => body),
-  );
+  return httpClient.post(`${baseUrl}/refs/branches`, {
+    body: { name : name, target : { hash : 'master' } },
+  }).pipe(map(({ body }) => body));
 }
 
 function getPackageJsonContent() {
   // TODO: handle different package.json location
   // TODO: handle pagination
-  return RxHR.get(`${baseUrl}/src`, defaults).pipe(
+  return httpClient.get(`${baseUrl}/src`).pipe(
     // TODO: handle errors
     map(({ body }) => body),
     map(({ values }) => values.find(file => file.path === 'package.json')),
-    mergeMap(file => RxHR.get(file.links.self.href, defaults)),
+    mergeMap(file => httpClient.get(file.links.self.href)),
     map(({ body }) => body),
   );
 }
 
-getPackageJsonContent().subscribe((console.log))
+function updateDependenciesVersions(packageJson, dependencyName, dependencyVersion) {
+  // TODO: handle dev/prod dependency location
+  return {
+    ...packageJson,
+    dependencies: {
+      ...(packageJson.dependencies || {}),
+      [dependencyName]: dependencyVersion,
+    },
+  }
+}
 
-// TODO: create a commit
-// TODO: create a PR
+function commitPackageJson(packageJson, branch) {
+  return httpClient.post(`${baseUrl}/src`, {
+    form: {
+      'package.json': JSON.stringify(packageJson, null, 2),
+      branch,
+      message: `Update ${branch}`
+    }
+  });
+}
+
+function createPullRequest(destinationBranch, sourceBranch) {
+  return httpClient.post(`${baseUrl}/pullrequests`, {
+    body: {
+      title: `${sourceBranch} -> ${destinationBranch}`,
+      source: { branch: { name: sourceBranch } },
+      destination: { branch: { name: destinationBranch } },
+    }
+  });
+}
+
+getPackageJsonContent().pipe(
+  map(packageJson => updateDependenciesVersions(packageJson, process.env.DEPENDENCY_NAME, process.env.DEPENDENCY_VERSION)),
+  // TODO: do not create a branch if dependency is already updated
+  mergeMap(packageJson => createBranch(branchName).pipe(
+    mergeMap(() => commitPackageJson(packageJson, branchName)),
+    mergeMap(() => createPullRequest('master', branchName)),
+  )),
+).subscribe();
